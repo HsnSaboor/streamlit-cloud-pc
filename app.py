@@ -1,82 +1,123 @@
-import streamlit as st
 import os
 import subprocess
-import secrets
-import shutil
+import streamlit as st
 
-# Function to check if sudo access is available
-def check_sudo():
-    try:
-        # Attempt to run a harmless sudo command
-        subprocess.run(["sudo", "-n", "true"], check=True)
-        return True
-    except subprocess.CalledProcessError:
-        return False
+# Streamlit App Title
+st.title("Linux Remote Desktop Setup")
 
-# Function to install required packages if not already installed
-def install_packages():
-    st.write("Checking and installing necessary packages...")
-    try:
-        subprocess.run(["sudo", "apt-get", "update"], check=True)
-        subprocess.run(["sudo", "apt-get", "install", "-y", "ubuntu-desktop", "x11vnc"], check=True)
-    except subprocess.CalledProcessError as e:
-        st.error(f"Failed to install packages: {e}")
-        return False
-    return True
+# Input fields for authentication and setup parameters
+CRD_SSH_Code = st.text_input("Google CRD SSH Code:", type="password")
+VNC_Password = st.text_input("VNC Password:", type="password")
+username = st.text_input("Username:", value="user")
+password = st.text_input("Password:", type="password", value="root")
+CRD_Pin = st.number_input("CRD PIN:", value=123456, step=1)
+VNC_Port = 5901  # Default VNC port
+Autostart = st.checkbox("Enable Autostart", value=True)
 
-# Function to generate a secure VNC password
-def generate_vnc_password():
-    return secrets.token_urlsafe(12)
+class RemoteDesktopSetup:
+    def __init__(self, username, password, crd_ssh_code, vnc_password, crd_pin, vnc_port, autostart):
+        self.username = username
+        self.password = password
+        self.crd_ssh_code = crd_ssh_code
+        self.vnc_password = vnc_password
+        self.crd_pin = crd_pin
+        self.vnc_port = vnc_port
+        self.autostart = autostart
+        self.setup()
 
-# Function to start the x11vnc server
-def start_vnc_server(vnc_password):
-    st.write("Starting VNC server...")
-    try:
-        # Write the VNC password to a file (for initial setup purposes)
-        password_file = "/tmp/vnc_password"
-        with open(password_file, "w") as f:
-            f.write(vnc_password)
-        
-        # Set permissions to read-only by the owner
-        os.chmod(password_file, 0o600)
-        
-        # Start x11vnc server with the specified password file
-        subprocess.run(["sudo", "x11vnc", "-storepasswd", vnc_password, password_file], check=True)
-        subprocess.Popen(["sudo", "x11vnc", "-display", ":0", "-auth", "guess", "-rfbauth", password_file])
-        st.success("VNC server started successfully.")
-    except subprocess.CalledProcessError as e:
-        st.error(f"Failed to start VNC server: {e}")
+    def setup(self):
+        try:
+            self.install_packages()
+            self.add_user_and_sudo()
+            self.setup_crd()
+            self.setup_vnc()
+            self.setup_autostart()
+            self.display_connection_details()
+        except Exception as e:
+            st.error(f"Error occurred during setup: {e}")
 
-# Function to display connection details
-def display_connection_details():
-    st.subheader("Connection Details:")
-    host_ip = subprocess.check_output(["hostname", "-I"]).decode().strip()
-    st.write(f"Host IP Address: {host_ip}")
-    st.write("VNC Port: 5900 (default)")
-    st.write("Connect using any VNC client with the above details.")
+    def install_packages(self):
+        st.write("Installing necessary packages...")
+        try:
+            subprocess.run(["sudo", "apt-get", "update"], check=True)
+            subprocess.run(["sudo", "apt-get", "install", "-y", "chrome-remote-desktop", "gnome-session", "gnome-shell", "tightvncserver"], check=True)
+            st.success("Packages installed successfully.")
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"Failed to install packages: {e}")
 
-# Main function to run the Streamlit app
+    def add_user_and_sudo(self):
+        st.write(f"Adding user '{self.username}' and granting sudo access...")
+        try:
+            os.system(f"useradd -m {self.username}")
+            os.system(f"adduser {self.username} sudo")
+            os.system(f"echo '{self.username}:{self.password}' | sudo chpasswd")
+            os.system("sed -i 's/\/bin\/sh/\/bin\/bash/g' /etc/passwd")
+            st.success(f"User '{self.username}' added with sudo access.")
+        except Exception as e:
+            raise RuntimeError(f"Failed to add user and grant sudo access: {e}")
+
+    def setup_crd(self):
+        st.write("Setting up Google Chrome Remote Desktop (CRD)...")
+        try:
+            subprocess.run(["wget", "https://dl.google.com/linux/direct/chrome-remote-desktop_current_amd64.deb"])
+            subprocess.run(["sudo", "dpkg", "--install", "chrome-remote-desktop_current_amd64.deb"])
+            subprocess.run(["sudo", "apt-get", "install", "--assume-yes", "--fix-broken"])
+            subprocess.run(["sudo", "adduser", self.username, "chrome-remote-desktop"])
+
+            # Configure CRD for autostart if enabled
+            if self.autostart:
+                crd_command = f"{self.crd_ssh_code} --pin={self.crd_pin}"
+                subprocess.run(["sudo", "su", "-", self.username, "-c", crd_command])
+
+            st.success("Google Chrome Remote Desktop setup completed.")
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"Failed to setup Google Chrome Remote Desktop: {e}")
+
+    def setup_vnc(self):
+        st.write("Setting up VNC server...")
+        try:
+            # Start VNC server and set password
+            subprocess.run(["sudo", "-u", self.username, "vncserver"])
+            os.system(f"sudo -u {self.username} bash -c 'echo {self.vnc_password} | vncpasswd -f > ~/.vnc/passwd'")
+            st.success("VNC server setup completed.")
+        except Exception as e:
+            raise RuntimeError(f"Failed to setup VNC server: {e}")
+
+    def setup_autostart(self):
+        st.write("Configuring autostart for remote desktop services...")
+        try:
+            # Configure CRD autostart if enabled
+            if self.autostart:
+                crd_autostart_file = f"/home/{self.username}/.config/autostart/chrome-remote-desktop.desktop"
+                with open(crd_autostart_file, "w") as f:
+                    f.write("[Desktop Entry]\n")
+                    f.write("Type=Application\n")
+                    f.write("Name=Chrome Remote Desktop\n")
+                    f.write("Exec=/opt/google/chrome-remote-desktop/chrome-remote-desktop --start\n")
+                    f.write("NoDisplay=true\n")
+                    f.write("X-GNOME-Autostart-enabled=true\n")
+                    f.write("Hidden=false\n")
+                os.system(f"chmod +x {crd_autostart_file}")
+                os.system(f"chown {self.username}:{self.username} {crd_autostart_file}")
+
+            st.success("Autostart configured for remote desktop services.")
+        except Exception as e:
+            raise RuntimeError(f"Failed to configure autostart: {e}")
+
+    def display_connection_details(self):
+        st.subheader("Connection Details:")
+        host_ip = subprocess.check_output(["hostname", "-I"]).decode().strip()
+        st.write(f"Host IP Address: {host_ip}")
+        st.write(f"Access your desktop through Google Chrome Remote Desktop or VNC on port {self.vnc_port}.")
+
 def main():
-    st.title("Linux VNC Server Setup")
-    
-    # Check if sudo access is available
-    if not check_sudo():
-        st.error("Sudo access is required to run this app.")
-        return
-    
-    # Install necessary packages if not already installed
-    if not install_packages():
-        st.error("Failed to install necessary packages.")
-        return
-    
-    # Generate a secure VNC password
-    vnc_password = generate_vnc_password()
-    
-    # Start the VNC server
-    start_vnc_server(vnc_password)
-    
-    # Display connection details
-    display_connection_details()
+    if CRD_SSH_Code and len(str(CRD_Pin)) >= 6 and VNC_Password:
+        try:
+            remote_setup = RemoteDesktopSetup(username, password, CRD_SSH_Code, VNC_Password, CRD_Pin, VNC_Port, Autostart)
+        except RuntimeError as e:
+            st.error(f"Error during setup: {e}")
+    else:
+        st.warning("Please enter valid CRD SSH Code, VNC Password (at least 6 characters), and CRD PIN (PIN should be at least 6 digits).")
 
 if __name__ == "__main__":
     main()
