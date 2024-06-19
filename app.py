@@ -59,10 +59,10 @@ class RemoteDesktopSetup:
     def install_packages(self):
         st.write("Installing necessary packages...")
         try:
-            subprocess.run(["sudo", "apt-get", "update"], check=True)
-            subprocess.run(["sudo", "apt-get", "install", "-y", "chrome-remote-desktop", "gnome-session", "gnome-shell", "tightvncserver"], check=True)
+            self.run_command(["sudo", "apt-get", "update"])  # Update package index
+            self.run_command(["sudo", "apt-get", "install", "-y", "chrome-remote-desktop", "gnome-session", "gnome-shell", "tightvncserver"])
             st.success("Packages installed successfully.")
-        except subprocess.CalledProcessError as e:
+        except Exception as e:
             raise RuntimeError(f"Failed to install packages: {e}")
 
     def setup_crd(self):
@@ -79,7 +79,7 @@ class RemoteDesktopSetup:
                 subprocess.run(["sudo", "su", "-", self.username, "-c", crd_command])
 
             st.success("Google Chrome Remote Desktop setup completed.")
-        except subprocess.CalledProcessError as e:
+        except Exception as e:
             raise RuntimeError(f"Failed to setup Google Chrome Remote Desktop: {e}")
 
     def setup_vnc(self):
@@ -118,6 +118,20 @@ class RemoteDesktopSetup:
         host_ip = subprocess.check_output(["hostname", "-I"]).decode().strip()
         st.write(f"Host IP Address: {host_ip}")
         st.write(f"Access your desktop through Google Chrome Remote Desktop or VNC on port {self.vnc_port}.")
+
+    def run_command(self, command):
+        try:
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            stdout, stderr = process.communicate()
+            if process.returncode == 0:
+                st.success(f"Command {' '.join(command)} executed successfully:")
+                st.code(stdout.decode('utf-8'))
+            else:
+                st.error(f"Error executing command {' '.join(command)}:")
+                st.code(stderr.decode('utf-8'))
+                raise RuntimeError(f"Command {' '.join(command)} returned non-zero exit status {process.returncode}")
+        except Exception as e:
+            raise RuntimeError(f"Exception occurred while executing command {' '.join(command)}: {e}")
 
 def main():
     if CRD_SSH_Code and len(str(CRD_Pin)) >= 6 and VNC_Password:
