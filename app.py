@@ -27,14 +27,34 @@ class RemoteDesktopSetup:
 
     def setup(self):
         try:
-            self.install_packages()
             self.add_user_and_sudo()
+            self.switch_to_user()
+            self.install_packages()
             self.setup_crd()
             self.setup_vnc()
             self.setup_autostart()
             self.display_connection_details()
         except Exception as e:
             st.error(f"Error occurred during setup: {e}")
+
+    def add_user_and_sudo(self):
+        st.write(f"Adding user '{self.username}' and granting sudo access...")
+        try:
+            os.system(f"useradd -m {self.username}")
+            os.system(f"echo '{self.username}:{self.password}' | sudo chpasswd")
+            os.system(f"adduser {self.username} sudo")
+            os.system("sed -i 's/\/bin\/sh/\/bin\/bash/g' /etc/passwd")
+            st.success(f"User '{self.username}' added with sudo access.")
+        except Exception as e:
+            raise RuntimeError(f"Failed to add user and grant sudo access: {e}")
+
+    def switch_to_user(self):
+        st.write(f"Switching to user '{self.username}'...")
+        try:
+            os.system(f"su - {self.username} -c 'cd ~'")
+            st.success(f"Switched to user '{self.username}'.")
+        except Exception as e:
+            raise RuntimeError(f"Failed to switch to user '{self.username}': {e}")
 
     def install_packages(self):
         st.write("Installing necessary packages...")
@@ -44,17 +64,6 @@ class RemoteDesktopSetup:
             st.success("Packages installed successfully.")
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"Failed to install packages: {e}")
-
-    def add_user_and_sudo(self):
-        st.write(f"Adding user '{self.username}' and granting sudo access...")
-        try:
-            os.system(f"useradd -m {self.username}")
-            os.system(f"adduser {self.username} sudo")
-            os.system(f"echo '{self.username}:{self.password}' | sudo chpasswd")
-            os.system("sed -i 's/\/bin\/sh/\/bin\/bash/g' /etc/passwd")
-            st.success(f"User '{self.username}' added with sudo access.")
-        except Exception as e:
-            raise RuntimeError(f"Failed to add user and grant sudo access: {e}")
 
     def setup_crd(self):
         st.write("Setting up Google Chrome Remote Desktop (CRD)...")
